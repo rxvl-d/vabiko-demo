@@ -2,13 +2,6 @@
 
 A Flask backend with React frontend for demonstrating VABiKo archive features.
 
-## Features
-
-- **Archive Browser**: Search URNs and view corresponding images and metadata
-- Supports both `:` and `+` URN formats
-- Displays METS XML metadata in formatted view
-- Responsive design
-
 ## Setup
 
 ### Backend (Flask)
