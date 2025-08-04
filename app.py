@@ -12,13 +12,10 @@ from flask_cors import CORS
 from collections import defaultdict
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
+from config import ARCHIVE_BASE, ENTITIES_FILE, FLASK_DEBUG, FLASK_PORT, FLASK_HOST, MAX_URNS_LIST
 
 app = Flask(__name__)
 CORS(app)
-
-# Configuration
-ARCHIVE_BASE = "/media/rsebastian/Lexar/vabiko/data/clean/export_jpg"
-ENTITIES_FILE = "/media/rsebastian/Lexar/vabiko/data/clean/export_model/vabiko_entities.json"
 
 # Global data structures for fast lookups
 entities_data = []
@@ -160,7 +157,7 @@ def list_urns():
     
     urns = []
     for item in sorted(archive_path.iterdir()):
-        if item.is_dir() and len(urns) < 100:
+        if item.is_dir() and len(urns) < MAX_URNS_LIST:
             # Convert filesystem format back to URN format
             urn = item.name.replace('+', ':')
             urns.append(urn)
@@ -256,4 +253,4 @@ def get_images_by_photographer(photographer_name):
 if __name__ == '__main__':
     # Load entities data at startup
     load_entities_data()
-    app.run(debug=True, port=5000)
+    app.run(debug=FLASK_DEBUG, port=FLASK_PORT, host=FLASK_HOST)
