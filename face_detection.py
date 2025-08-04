@@ -314,7 +314,7 @@ class FaceDetectionSystem:
             self._save_wikidata_cache()
             return []
     
-    def compare_faces(self, archive_encodings, wikidata_encodings, threshold=0.6):
+    def compare_faces(self, archive_encodings, wikidata_encodings, threshold=0.0):
         """Compare faces between archive and Wikidata images"""
         try:
             if not archive_encodings or not wikidata_encodings:

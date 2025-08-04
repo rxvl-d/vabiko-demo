@@ -172,22 +172,6 @@ function FaceLinking() {
                           alt={`Wikidata image for ${personData.unified_name}`}
                           className="w-full"
                         />
-                        {wikiImg.face_count > 0 && (
-                          <div className="absolute top-2 right-2 bg-blue-500 text-white px-2 py-1 rounded text-sm font-semibold">
-                            {(() => {
-                              // Find best similarity for this Wikidata image
-                              const wikidataIndex = personData.wikidata_images.findIndex(img => img.entity_id === wikiImg.entity_id);
-                              const bestMatch = personData.face_similarity?.similarities?.filter(s => s.wikidata_image_index === wikidataIndex)
-                                .sort((a, b) => b.similarity - a.similarity)[0];
-                              
-                              if (bestMatch) {
-                                return `${(bestMatch.similarity * 100).toFixed(0)}% match`;
-                              } else {
-                                return `${wikiImg.face_count} face${wikiImg.face_count !== 1 ? 's' : ''}`;
-                              }
-                            })()}
-                          </div>
-                        )}
                       </div>
                     )}
                     <div className="p-4">
@@ -364,7 +348,7 @@ function FaceLinking() {
                 <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-lg">
                   <h5 className="font-semibold text-yellow-800 mb-2">No Face Matches Found</h5>
                   <p className="text-sm text-yellow-700 mb-2">
-                    No face similarities above the 60% threshold were detected between archive and Wikidata images.
+                    No face similarities were detected between archive and Wikidata images.
                   </p>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
