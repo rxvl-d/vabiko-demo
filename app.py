@@ -8,6 +8,7 @@ import os
 import json
 import csv
 import ast
+import logging
 from pathlib import Path
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
@@ -15,9 +16,21 @@ from collections import defaultdict
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
 from config import ARCHIVE_BASE, ENTITIES_FILE, PERSONS_CSV_FILE, FLASK_DEBUG, FLASK_PORT, FLASK_HOST, MAX_URNS_LIST
+from wikidata_cache import WikidataImageCache
+from face_detection import FaceDetectionSystem
 
 app = Flask(__name__)
 CORS(app)
+
+# Configure logging
+if not app.debug:
+    logging.basicConfig(level=logging.INFO)
+else:
+    logging.basicConfig(level=logging.DEBUG)
+
+# Initialize face detection and Wikidata cache systems
+face_detector = FaceDetectionSystem()
+wikidata_cache = WikidataImageCache()
 
 # Global data structures for fast lookups
 entities_data = []
@@ -144,6 +157,11 @@ def get_interfaces():
             'id': 'person_linking',
             'name': 'Person Linking',
             'description': 'Browse unified person names with Wikidata links and mapping information'
+        },
+        {
+            'id': 'face_linking',
+            'name': 'Face Linking',
+            'description': 'View faces in images with person linking and Wikidata integration'
         }
     ])
 
@@ -194,6 +212,74 @@ def get_image(urn):
         return jsonify({'error': f'Image not found for URN: {urn}'}), 404
     
     return send_file(str(image_path), mimetype='image/jpeg')
+
+@app.route('/api/image-with-faces/<path:urn>')
+def get_image_with_faces(urn):
+    """Serve image with face detection bounding boxes"""
+    urn_dir = find_urn_directory(urn)
+    
+    if not urn_dir:
+        return jsonify({'error': f'URN not found: {urn}'}), 404
+    
+    image_path = urn_dir / 'image.jpg'
+    if not image_path.exists():
+        return jsonify({'error': f'Image not found for URN: {urn}'}), 404
+    
+    # Get faces and image with bounding boxes
+    result = face_detector.get_faces_with_boxes(image_path)
+    
+    if result['image_with_boxes']:
+        from flask import Response
+        return Response(result['image_with_boxes'], mimetype='image/jpeg')
+    else:
+        # Fallback to original image if face detection fails
+        return send_file(str(image_path), mimetype='image/jpeg')
+
+@app.route('/api/wikidata-image/<path:entity_id>')
+def get_wikidata_image(entity_id):
+    """Serve cached Wikidata image for entity"""
+    wikidata_url = f"https://www.wikidata.org/wiki/{entity_id}"
+    
+    # Get cached image path
+    image_path = wikidata_cache.get_cached_image_path(wikidata_url)
+    
+    if image_path and image_path.exists():
+        # Determine mimetype from file extension
+        mimetype = 'image/jpeg'
+        if str(image_path).lower().endswith('.png'):
+            mimetype = 'image/png'
+        elif str(image_path).lower().endswith('.gif'):
+            mimetype = 'image/gif'
+        elif str(image_path).lower().endswith('.webp'):
+            mimetype = 'image/webp'
+        
+        return send_file(str(image_path), mimetype=mimetype)
+    else:
+        return jsonify({'error': f'Image not found for entity: {entity_id}'}), 404
+
+@app.route('/api/wikidata-image-with-faces/<path:entity_id>')
+def get_wikidata_image_with_faces(entity_id):
+    """Serve Wikidata image with face detection bounding boxes"""
+    wikidata_url = f"https://www.wikidata.org/wiki/{entity_id}"
+    
+    # Get cached image path
+    image_path = wikidata_cache.get_cached_image_path(wikidata_url)
+    
+    if image_path and image_path.exists():
+        # Create image URL for face detection
+        image_url = f"http://localhost:{FLASK_PORT}/api/wikidata-image/{entity_id}"
+        
+        # Get image with face bounding boxes
+        image_with_boxes = face_detector.create_wikidata_image_with_face_boxes(image_url)
+        
+        if image_with_boxes:
+            from flask import Response
+            return Response(image_with_boxes, mimetype='image/jpeg')
+        else:
+            # Fallback to original image if face detection fails
+            return send_file(str(image_path), mimetype='image/jpeg')
+    else:
+        return jsonify({'error': f'Image not found for entity: {entity_id}'}), 404
 
 @app.route('/api/list')
 def list_urns():
@@ -442,6 +528,167 @@ def get_unified_name_details(unified_name):
         'images': images,
         'total_images': len(images),
         'total_existing_names': len(existing_names)
+    })
+
+@app.route('/api/faces/linked-persons')
+def get_linked_persons():
+    """Get list of persons with V4 links for face linking interface"""
+    linked_persons = []
+    
+    # Filter for depicted persons with V4 links
+    for unified_name, person_records in unified_names_index.items():
+        if not unified_name.strip():
+            continue
+        
+        # Check if any record is a depicted person with a V4 link
+        has_v4_link = False
+        total_images = 0
+        wikidata_links = set()
+        
+        for record in person_records:
+            if record.get('person_type', '').strip() == 'depicted_person':
+                v4_link = record.get('linked_name_v4', '').strip()
+                if v4_link:
+                    has_v4_link = True
+                    wikidata_links.add(v4_link)
+                    
+                urns = parse_urn_list(record.get('items_with_person', ''))
+                total_images += len(urns)
+        
+        if has_v4_link and total_images > 0:
+            linked_persons.append({
+                'unified_name': unified_name,
+                'image_count': total_images,
+                'wikidata_links': list(wikidata_links),
+                'display_name': f"{unified_name} ({total_images} images)"
+            })
+    
+    # Sort by image count descending
+    linked_persons.sort(key=lambda x: (-x['image_count'], x['unified_name']))
+    
+    return jsonify({
+        'persons': linked_persons,
+        'total': len(linked_persons)
+    })
+
+@app.route('/api/faces/person/<path:unified_name>')
+def get_person_face_data(unified_name):
+    """Get face detection data and Wikidata images for a person"""
+    person_records = unified_names_index.get(unified_name, [])
+    
+    if not person_records:
+        return jsonify({'error': f'Person not found: {unified_name}'}), 404
+    
+    # Filter for depicted person records only
+    depicted_records = [
+        record for record in person_records 
+        if record.get('person_type', '').strip() == 'depicted_person'
+    ]
+    
+    if not depicted_records:
+        return jsonify({'error': f'No depicted person records found for: {unified_name}'}), 404
+    
+    # Collect all URNs and Wikidata links
+    all_urns = set()
+    wikidata_links = set()
+    
+    for record in depicted_records:
+        v4_link = record.get('linked_name_v4', '').strip()
+        if v4_link:
+            wikidata_links.add(v4_link)
+        
+        urns = parse_urn_list(record.get('items_with_person', ''))
+        all_urns.update(urns)
+    
+    # Get image data with face detection
+    images_with_faces = []
+    for urn in all_urns:
+        entity = next((e for e in entities_data if e.get('urn') == urn), None)
+        if entity and entity.get('image_path'):
+            # Get face detection data
+            urn_dir = find_urn_directory(urn)
+            if urn_dir:
+                image_path = urn_dir / 'image.jpg'
+                if image_path.exists():
+                    face_data = face_detector.get_faces_with_boxes(image_path)
+                    
+                    images_with_faces.append({
+                        'urn': urn,
+                        'title': entity.get('title', ''),
+                        'content_keywords': entity.get('content_keywords', []),
+                        'subject_location': entity.get('subject_location', []),
+                        'faces': face_data['faces'],
+                        'face_count': int(face_data['face_count']),
+                        'has_faces': bool(face_data['face_count'] > 0)
+                    })
+    
+    # Get Wikidata image data
+    wikidata_images = []
+    wikidata_image_urls = []
+    for link in wikidata_links:
+        entity_id = wikidata_cache.get_entity_id(link)
+        if entity_id:
+            # Fetch/cache the image
+            image_data = wikidata_cache.fetch_wikidata_image(link)
+            if image_data and not image_data.get('error'):
+                image_url = f'/api/wikidata-image/{entity_id}'
+                full_image_url = f"http://localhost:{FLASK_PORT}{image_url}"
+                
+                # Get face detection data for this Wikidata image
+                wikidata_face_encodings = face_detector.get_face_encodings_from_url(full_image_url)
+                
+                wikidata_images.append({
+                    'entity_id': entity_id,
+                    'wikidata_url': link,
+                    'image_url': image_url,
+                    'image_with_faces_url': f'/api/wikidata-image-with-faces/{entity_id}',
+                    'has_image': bool(image_data.get('image_path')),
+                    'face_count': int(len(wikidata_face_encodings)),
+                    'has_faces': bool(len(wikidata_face_encodings) > 0)
+                })
+                # Collect full URLs for face similarity analysis
+                wikidata_image_urls.append(full_image_url)
+    
+    # Perform face similarity analysis
+    face_similarity_results = {'similarities': [], 'summary': {'total_matches': 0}}
+    if images_with_faces and wikidata_image_urls:
+        try:
+            # Get archive image paths
+            archive_image_paths = []
+            for img in images_with_faces:
+                if img['face_count'] > 0:  # Only analyze images with faces
+                    urn_dir = find_urn_directory(img['urn'])
+                    if urn_dir:
+                        image_path = urn_dir / 'image.jpg'
+                        if image_path.exists():
+                            archive_image_paths.append(image_path)
+            
+            if archive_image_paths:
+                face_similarity_results = face_detector.analyze_person_face_similarity(
+                    archive_image_paths, wikidata_image_urls
+                )
+                
+                # Add URN mapping to similarity results
+                for similarity in face_similarity_results.get('similarities', []):
+                    arch_idx = similarity['archive_image_index']
+                    if arch_idx < len(archive_image_paths):
+                        # Find corresponding URN
+                        for img in images_with_faces:
+                            urn_dir = find_urn_directory(img['urn'])
+                            if urn_dir and urn_dir / 'image.jpg' == archive_image_paths[arch_idx]:
+                                similarity['archive_urn'] = img['urn']
+                                break
+        except Exception as e:
+            app.logger.error(f"Error in face similarity analysis: {e}")
+    
+    return jsonify({
+        'unified_name': unified_name,
+        'wikidata_links': list(wikidata_links),
+        'wikidata_images': wikidata_images,
+        'images': images_with_faces,
+        'total_images': len(images_with_faces),
+        'total_faces': sum(img['face_count'] for img in images_with_faces),
+        'face_similarity': face_similarity_results
     })
 
 if __name__ == '__main__':

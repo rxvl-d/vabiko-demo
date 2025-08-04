@@ -86,3 +86,8 @@ coverage/
 # Temporary files
 *.tmp
 *.temp
+
+# caches
+
+wikidata_face_cache.json
+wikidata_cache

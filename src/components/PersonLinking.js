@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import ImageDisplay from './ImageDisplay';
 
 function PersonLinking() {
   const [linkingMethod, setLinkingMethod] = useState('v1');
@@ -202,10 +203,10 @@ function PersonLinking() {
               {personDetails.images.map((image, index) => (
                 <div key={image.urn || index} className="border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm">
                   {image.has_image && (
-                    <img
+                    <ImageDisplay
                       src={`/api/image/${encodeURIComponent(image.urn)}`}
                       alt={image.title || 'Archive image'}
-                      className="w-full h-48 object-cover"
+                      className="w-full"
                     />
                   )}
                   <div className="p-4">
