@@ -29,11 +29,11 @@ function App() {
   };
 
   if (loading) {
-    return <div className="loading">Loading...</div>;
+    return <div className="text-center py-5 text-gray-600">Loading...</div>;
   }
 
   return (
-    <div className="container">
+    <div className="max-w-6xl mx-auto p-5 bg-gray-50 min-h-screen">
       <Header 
         interfaces={interfaces}
         selectedInterface={selectedInterface}
