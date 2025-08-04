@@ -19,30 +19,74 @@ code {
   padding: 20px;
 }
 
-.header {
-  text-align: center;
+.top-header {
+  display: flex;
+  gap: 20px;
   margin-bottom: 30px;
   padding: 20px;
   background: white;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  align-items: flex-start;
+}
+
+.header-left {
+  flex: 1;
+  max-width: 50%;
+}
+
+.header-left h1 {
+  font-size: 1.8rem;
+  margin: 0 0 10px 0;
+  color: #333;
+}
+
+.header-left p {
+  margin: 0;
+  color: #666;
+  font-size: 0.95rem;
 }
 
 .interface-selector {
-  margin-bottom: 30px;
-  padding: 20px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  flex: 1;
+  max-width: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.interface-selector label {
+  margin-bottom: 8px;
+  text-align: right;
 }
 
 .interface-selector select {
   width: 100%;
+  max-width: 400px;
   padding: 10px;
   font-size: 16px;
   border: 1px solid #ddd;
   border-radius: 4px;
   background: white;
+}
+
+@media (max-width: 768px) {
+  .top-header {
+    flex-direction: column;
+  }
+  
+  .header-left,
+  .interface-selector {
+    max-width: 100%;
+  }
+  
+  .interface-selector {
+    align-items: flex-start;
+  }
+  
+  .interface-selector label {
+    text-align: left;
+  }
 }
 
 .archive-browser {
@@ -161,4 +205,111 @@ code {
 
 .image-info strong {
   color: #333;
+}
+
+.controls-section {
+  background: #f8f9fa;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border: 1px solid #dee2e6;
+}
+
+.person-details {
+  display: flex;
+  gap: 30px;
+  margin-bottom: 30px;
+}
+
+.name-mappings {
+  flex: 1;
+}
+
+.wikidata-summary {
+  flex: 1;
+}
+
+.existing-names-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 10px;
+  background: white;
+}
+
+.name-mapping {
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.name-mapping:last-child {
+  border-bottom: none;
+}
+
+.existing-name {
+  flex: 1;
+}
+
+.name-info {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+}
+
+.image-count {
+  background: #e3f2fd;
+  color: #1976d2;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.person-type-badge {
+  background: #f3e5f5;
+  color: #7b1fa2;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: bold;
+  margin-top: 4px;
+  display: inline-block;
+}
+
+.person-type-badge:empty {
+  display: none;
+}
+
+.wikidata-link {
+  background: #4caf50;
+  color: white !important;
+  padding: 4px 8px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.wikidata-link:hover {
+  background: #45a049;
+}
+
+.images-section {
+  margin-top: 30px;
+}
+
+@media (max-width: 768px) {
+  .person-details {
+    flex-direction: column;
+  }
+  
+  .name-mapping {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+  }
 }

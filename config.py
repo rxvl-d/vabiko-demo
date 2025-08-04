@@ -33,6 +33,19 @@ This file should contain a list of objects with fields like:
 - etc.
 """
 
+PERSONS_CSV_FILE = os.getenv(
+    'VABIKO_PERSONS_CSV', 
+    "/media/rsebastian/Lexar/vabiko/data/clean/persons.csv"
+)
+"""Path to the CSV file containing person name mappings and Wikidata links.
+This file should contain columns:
+- existing_name: Original name from the archive
+- unified_name: Cleaned/standardized name
+- linked_name: Wikidata link (v1)
+- linked_name_v2/v3/v4: Alternative Wikidata links
+- items_with_person: List of URNs containing this person
+"""
+
 # Flask application settings
 FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'True').lower() == 'true'
 FLASK_PORT = int(os.getenv('FLASK_PORT', '5000'))

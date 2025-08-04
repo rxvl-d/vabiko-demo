@@ -6,13 +6,15 @@ Provides endpoints for browsing the image archive and serving metadata.
 
 import os
 import json
+import csv
+import ast
 from pathlib import Path
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from collections import defaultdict
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
-from config import ARCHIVE_BASE, ENTITIES_FILE, FLASK_DEBUG, FLASK_PORT, FLASK_HOST, MAX_URNS_LIST
+from config import ARCHIVE_BASE, ENTITIES_FILE, PERSONS_CSV_FILE, FLASK_DEBUG, FLASK_PORT, FLASK_HOST, MAX_URNS_LIST
 
 app = Flask(__name__)
 CORS(app)
@@ -21,6 +23,11 @@ CORS(app)
 entities_data = []
 people_index = defaultdict(list)  # person_name -> [entity_objects]
 photographer_index = defaultdict(list)  # photographer_name -> [entity_objects]
+
+# Person linking data structures
+persons_data = []  # Raw CSV data
+unified_names_index = defaultdict(list)  # unified_name -> [person_records]
+existing_to_unified = {}  # existing_name -> unified_name
 
 def normalize_urn(urn):
     """Normalize URN format (convert : to + for filesystem lookup)"""
@@ -73,6 +80,42 @@ def load_entities_data():
         print(f"Error loading entities data: {e}")
         entities_data = []
 
+def load_persons_data():
+    """Load and index the persons CSV file at startup"""
+    global persons_data, unified_names_index, existing_to_unified
+    
+    try:
+        print(f"Loading persons data from {PERSONS_CSV_FILE}...")
+        with open(PERSONS_CSV_FILE, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            persons_data = list(reader)
+        
+        print(f"Loaded {len(persons_data)} person records")
+        
+        # Build indexes for fast lookups
+        for person in persons_data:
+            existing_name = person.get('existing_name', '').strip()
+            unified_name = person.get('unified_name', '').strip()
+            
+            if existing_name and unified_name:
+                unified_names_index[unified_name].append(person)
+                existing_to_unified[existing_name] = unified_name
+        
+        print(f"Indexed {len(unified_names_index)} unified names from {len(existing_to_unified)} existing names")
+        
+    except Exception as e:
+        print(f"Error loading persons data: {e}")
+        persons_data = []
+
+def parse_urn_list(urn_string):
+    """Parse the URN list string from CSV (stored as string representation of Python list)"""
+    try:
+        if urn_string and urn_string.strip():
+            return ast.literal_eval(urn_string)
+        return []
+    except:
+        return []
+
 def format_xml(xml_content):
     """Format XML content for display"""
     try:
@@ -96,6 +139,11 @@ def get_interfaces():
             'id': 'people_browser',
             'name': 'People Browser',
             'description': 'Browse images by depicted persons and photographers'
+        },
+        {
+            'id': 'person_linking',
+            'name': 'Person Linking',
+            'description': 'Browse unified person names with Wikidata links and mapping information'
         }
     ])
 
@@ -250,7 +298,154 @@ def get_images_by_photographer(photographer_name):
         'total': len(results)
     })
 
+@app.route('/api/linking/unified-names')
+def get_unified_names():
+    """Get list of unified names with filtering options"""
+    has_link = request.args.get('has_link', '')  # 'true', 'false', or ''
+    method = request.args.get('method', 'v1')  # v1, v2, v3, v4
+    person_type = request.args.get('person_type', '')  # 'depicted_person', 'photographer', or ''
+    
+    # Map method to column name
+    link_column = {
+        'v1': 'linked_name',
+        'v2': 'linked_name_v2', 
+        'v3': 'linked_name_v3',
+        'v4': 'linked_name_v4'
+    }.get(method, 'linked_name')
+    
+    unified_names_with_info = []
+    
+    for unified_name, person_records in unified_names_index.items():
+        if not unified_name.strip():
+            continue
+        
+        # Apply person_type filter - check if any record matches the type
+        if person_type:
+            matching_records = [
+                record for record in person_records 
+                if record.get('person_type', '').strip() == person_type
+            ]
+            if not matching_records:
+                continue
+            # Use only matching records for further processing
+            person_records = matching_records
+            
+        # Check if any record has a link for this method
+        has_any_link = any(
+            record.get(link_column, '').strip() 
+            for record in person_records
+        )
+        
+        # Apply has_link filter
+        if has_link == 'true' and not has_any_link:
+            continue
+        elif has_link == 'false' and has_any_link:
+            continue
+        
+        # Count total images across all existing names for this unified name
+        total_images = 0
+        for record in person_records:
+            urns = parse_urn_list(record.get('items_with_person', ''))
+            total_images += len(urns)
+        
+        unified_names_with_info.append({
+            'unified_name': unified_name,
+            'has_link': has_any_link,
+            'image_count': total_images,
+            'existing_names_count': len(person_records),
+            'display_name': f"{unified_name} ({total_images} images, {len(person_records)} variants)"
+        })
+    
+    # Sort by image count descending, then by name
+    unified_names_with_info.sort(key=lambda x: (-x['image_count'], x['unified_name']))
+    
+    return jsonify({
+        'unified_names': unified_names_with_info,
+        'total': len(unified_names_with_info),
+        'method': method,
+        'has_link_filter': has_link,
+        'person_type_filter': person_type
+    })
+
+@app.route('/api/linking/unified-name/<path:unified_name>')
+def get_unified_name_details(unified_name):
+    """Get detailed information about a unified name"""
+    method = request.args.get('method', 'v1')
+    person_type = request.args.get('person_type', '')
+    
+    # Map method to column name
+    link_column = {
+        'v1': 'linked_name',
+        'v2': 'linked_name_v2', 
+        'v3': 'linked_name_v3',
+        'v4': 'linked_name_v4'
+    }.get(method, 'linked_name')
+    
+    person_records = unified_names_index.get(unified_name, [])
+    
+    if not person_records:
+        return jsonify({'error': f'Unified name not found: {unified_name}'}), 404
+    
+    # Apply person_type filter if specified
+    if person_type:
+        person_records = [
+            record for record in person_records 
+            if record.get('person_type', '').strip() == person_type
+        ]
+        if not person_records:
+            return jsonify({'error': f'No records found for unified name "{unified_name}" with person_type "{person_type}"'}), 404
+    
+    # Collect all existing names and their info
+    existing_names = []
+    all_urns = set()
+    wikidata_links = set()
+    
+    for record in person_records:
+        existing_name = record.get('existing_name', '').strip()
+        link = record.get(link_column, '').strip()
+        urns = parse_urn_list(record.get('items_with_person', ''))
+        
+        existing_names.append({
+            'existing_name': existing_name,
+            'person_type': record.get('person_type', ''),
+            'wikidata_link': link,
+            'image_count': len(urns),
+            'urns': urns
+        })
+        
+        all_urns.update(urns)
+        if link:
+            wikidata_links.add(link)
+    
+    # Get image data for all URNs
+    images = []
+    for urn in all_urns:
+        # Find entity data for this URN
+        entity = next((e for e in entities_data if e.get('urn') == urn), None)
+        if entity:
+            images.append({
+                'urn': urn,
+                'title': entity.get('title', ''),
+                'image_path': entity.get('image_path', ''),
+                'content_keywords': entity.get('content_keywords', []),
+                'subject_location': entity.get('subject_location', []),
+                'creation_date': entity.get('creation_date', {}),
+                'has_image': bool(entity.get('image_path'))
+            })
+    
+    return jsonify({
+        'unified_name': unified_name,
+        'method': method,
+        'person_type_filter': person_type,
+        'existing_names': existing_names,
+        'wikidata_links': list(wikidata_links),
+        'images': images,
+        'total_images': len(images),
+        'total_existing_names': len(existing_names)
+    })
+
 if __name__ == '__main__':
-    # Load entities data at startup
+    # Load data at startup
     load_entities_data()
+    load_persons_data()
     app.run(debug=FLASK_DEBUG, port=FLASK_PORT, host=FLASK_HOST)
