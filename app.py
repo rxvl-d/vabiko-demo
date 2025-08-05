@@ -162,6 +162,11 @@ def get_interfaces():
             'id': 'face_linking',
             'name': 'Face Linking',
             'description': 'View faces in images with person linking and Wikidata integration'
+        },
+        {
+            'id': 'face_similarity',
+            'name': 'Face Similarity',
+            'description': 'Find faces that are similar to each other across all archive images'
         }
     ])
 
@@ -690,6 +695,161 @@ def get_person_face_data(unified_name):
         'total_faces': sum(img['face_count'] for img in images_with_faces),
         'face_similarity': face_similarity_results
     })
+
+# Face Similarity API endpoints
+from process_all_faces import FaceDatabase, FaceProcessor
+
+face_processor = None
+face_db = None
+
+def init_face_similarity():
+    """Initialize face similarity system"""
+    global face_processor, face_db
+    try:
+        face_processor = FaceProcessor()
+        face_db = FaceDatabase()
+        return True
+    except Exception as e:
+        app.logger.error(f"Error initializing face similarity: {e}")
+        return False
+
+@app.route('/api/face-similarity/random-face', methods=['GET'])
+def get_random_face():
+    """Get a random face to start similarity search"""
+    if not face_db and not init_face_similarity():
+        return jsonify({'error': 'Face similarity system not available'}), 500
+    
+    try:
+        all_faces = face_db.get_all_faces()
+        if not all_faces:
+            return jsonify({'error': 'No faces available'}), 404
+        
+        import random
+        random_face = random.choice(all_faces)
+        
+        # Get names for this face's image
+        image_names = face_db.get_image_names(random_face['image_urn'])
+        
+        return jsonify({
+            'face': {
+                'id': random_face['id'],
+                'face_hash': random_face['face_hash'],
+                'image_urn': random_face['image_urn'],
+                'face_index': random_face['face_index'],
+                'face_image_path': random_face['face_image_path'],
+                'face_location': {
+                    'left': random_face['face_left'],
+                    'top': random_face['face_top'],
+                    'right': random_face['face_right'],
+                    'bottom': random_face['face_bottom']
+                }
+            },
+            'image_names': image_names
+        })
+    except Exception as e:
+        app.logger.error(f"Error getting random face: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/face-similarity/similar/<face_id>', methods=['GET'])
+def get_similar_faces(face_id):
+    """Get faces similar to the specified face"""
+    if not face_processor and not init_face_similarity():
+        return jsonify({'error': 'Face similarity system not available'}), 500
+    
+    try:
+        # Get the target face
+        all_faces = face_db.get_all_faces()
+        target_face = None
+        for face in all_faces:
+            if face['id'] == int(face_id):
+                target_face = face
+                break
+        
+        if not target_face:
+            return jsonify({'error': 'Face not found'}), 404
+        
+        # Find similar faces
+        limit = request.args.get('limit', 10, type=int)
+        similar_faces = face_processor.find_similar_faces(
+            target_face['face_encoding'], 
+            limit=limit + 1  # +1 to exclude the target face itself
+        )
+        
+        # Remove the target face from results
+        similar_faces = [sf for sf in similar_faces if sf['face']['id'] != int(face_id)][:limit]
+        
+        # Format results
+        results = []
+        for similar_face in similar_faces:
+            face = similar_face['face']
+            results.append({
+                'face': {
+                    'id': face['id'],
+                    'face_hash': face['face_hash'],
+                    'image_urn': face['image_urn'],
+                    'face_index': face['face_index'],
+                    'face_image_path': face['face_image_path'],
+                    'face_location': {
+                        'left': face['face_left'],
+                        'top': face['face_top'],
+                        'right': face['face_right'],
+                        'bottom': face['face_bottom']
+                    }
+                },
+                'similarity': similar_face['similarity'],
+                'distance': similar_face['distance'],
+                'image_names': similar_face['image_names']
+            })
+        
+        return jsonify({
+            'target_face': {
+                'id': target_face['id'],
+                'face_hash': target_face['face_hash'],
+                'image_urn': target_face['image_urn'],
+                'face_index': target_face['face_index'],
+                'face_image_path': target_face['face_image_path']
+            },
+            'target_image_names': face_db.get_image_names(target_face['image_urn']),
+            'similar_faces': results,
+            'total_found': len(results)
+        })
+    except Exception as e:
+        app.logger.error(f"Error finding similar faces: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/face-similarity/face-image/<face_hash>')
+def serve_face_image(face_hash):
+    """Serve extracted face image"""
+    try:
+        face_image_path = Path("extracted_faces") / f"{face_hash}.jpg"
+        if face_image_path.exists():
+            return send_file(str(face_image_path), mimetype='image/jpeg')
+        else:
+            return jsonify({'error': 'Face image not found'}), 404
+    except Exception as e:
+        app.logger.error(f"Error serving face image: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/face-similarity/stats', methods=['GET'])
+def get_face_similarity_stats():
+    """Get statistics about the face database"""
+    if not face_db and not init_face_similarity():
+        return jsonify({'error': 'Face similarity system not available'}), 500
+    
+    try:
+        all_faces = face_db.get_all_faces()
+        
+        # Count unique images
+        unique_images = set(face['image_urn'] for face in all_faces)
+        
+        return jsonify({
+            'total_faces': len(all_faces),
+            'unique_images': len(unique_images),
+            'avg_faces_per_image': len(all_faces) / len(unique_images) if unique_images else 0
+        })
+    except Exception as e:
+        app.logger.error(f"Error getting face similarity stats: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 if __name__ == '__main__':
     # Load data at startup

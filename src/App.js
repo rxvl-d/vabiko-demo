@@ -5,6 +5,7 @@ import ArchiveBrowser from './components/ArchiveBrowser';
 import PeopleBrowser from './components/PeopleBrowser';
 import PersonLinking from './components/PersonLinking';
 import FaceLinking from './components/FaceLinking';
+import FaceSimilarity from './components/FaceSimilarity';
 
 function App() {
   const [interfaces, setInterfaces] = useState([]);
@@ -45,6 +46,7 @@ function App() {
       {selectedInterface === 'people_browser' && <PeopleBrowser />}
       {selectedInterface === 'person_linking' && <PersonLinking />}
       {selectedInterface === 'face_linking' && <FaceLinking />}
+      {selectedInterface === 'face_similarity' && <FaceSimilarity />}
     </div>
   );
 }

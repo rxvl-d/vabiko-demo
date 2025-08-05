@@ -91,3 +91,5 @@ coverage/
 
 wikidata_face_cache.json
 wikidata_cache
+extracted_faces
+faces.db
